@@ -10,7 +10,9 @@ import numpy as np
 import requests
 import random
 from datetime import datetime, timedelta
-import altair as alt
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ---------------------------------------------------------
 # DATA FETCHER (Ethical + Open Data)
@@ -56,7 +58,7 @@ class SocialMediaDataFetcher:
                     if records:  # Only return if we have data
                         return pd.DataFrame(records)
                 
-        except Exception:
+        except Exception as e:
             # Silently fail and use fallback data
             pass
 
@@ -115,124 +117,186 @@ class SocialMediaDataFetcher:
         return pd.DataFrame(rows)
 
 # ---------------------------------------------------------
-# VISUALIZATION (Using Altair/Streamlit native)
+# VISUALIZATION (Highcharts-style via Plotly)
 # ---------------------------------------------------------
 
 class Visualizer:
 
     def twitter_bubble(self, df):
-        """Create bubble chart using Altair"""
-        chart = alt.Chart(df).mark_circle(size=100).encode(
-            x=alt.X('category:N', title='Category'),
-            y=alt.Y('volume:Q', title='Tweet Volume'),
-            size='volume:Q',
-            color='category:N',
-            tooltip=['trend:N', 'volume:Q', 'category:N']
-        ).properties(
-            title='Twitter Privacy & Security Trends',
-            width=600,
-            height=400
+        fig = px.scatter(
+            df,
+            x="category",
+            y="volume",
+            size="volume",
+            color="category",
+            hover_name="trend",
+            title="Twitter Privacy & Security Trends"
         )
-        return chart
+        fig.update_layout(height=450)
+        return fig
 
     def security_timeline(self, df):
-        """Create stacked bar chart using Altair"""
+        # Check if DataFrame is empty or doesn't have required columns
         if df.empty or 'published' not in df.columns:
-            st.info("No security timeline data available")
-            return None
-        
-        try:
-            # Prepare data
-            df_processed = df.copy()
-            df_processed["month"] = df_processed["published"].dt.strftime("%Y-%m")
-            
-            chart = alt.Chart(df_processed).mark_bar().encode(
-                x=alt.X('month:N', title='Month'),
-                y=alt.Y('count():Q', title='Number of Incidents'),
-                color='severity:N',
-                tooltip=['month:N', 'severity:N', 'count():Q']
-            ).properties(
-                title='GitHub Security Incidents Timeline',
-                width=600,
-                height=400
+            # Return empty chart with message
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No security timeline data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
             )
-            return chart
+            fig.update_layout(
+                title="GitHub Security Incidents Timeline",
+                height=450,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            return fig
+        
+        # Process data safely
+        try:
+            # Make a copy to avoid modifying the original
+            df_processed = df.copy()
+            df_processed["month"] = df_processed["published"].dt.to_period("M").astype(str)
+            grouped = df_processed.groupby(["month", "severity"]).size().unstack(fill_value=0)
         except Exception:
-            st.info("Error creating security timeline")
-            return None
+            # If processing fails, create simple empty chart
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Error processing security data",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
+            )
+            fig.update_layout(
+                title="GitHub Security Incidents Timeline",
+                height=450,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            return fig
+        
+        # Create the chart
+        fig = go.Figure()
+        for sev in grouped.columns:
+            fig.add_bar(x=grouped.index, y=grouped[sev], name=sev)
+        
+        fig.update_layout(
+            barmode="stack",
+            title="GitHub Security Incidents Timeline",
+            xaxis_title="Month",
+            yaxis_title="Number of Incidents",
+            height=450
+        )
+        return fig
 
     def privacy_heatmap(self, df):
-        """Create heatmap using Altair"""
-        if df.empty or 'hour' not in df.columns:
-            st.info("No location privacy data available")
-            return None
+        # Check if DataFrame has enough data
+        if df.empty or 'hour' not in df.columns or 'day' not in df.columns:
+            # Return empty chart with message
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No location privacy data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
+            )
+            fig.update_layout(
+                title="Location Privacy Risk Heatmap",
+                height=450,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            return fig
         
         try:
-            chart = alt.Chart(df).mark_rect().encode(
-                x=alt.X('day:O', title='Day of Month'),
-                y=alt.Y('hour:O', title='Hour of Day'),
-                color=alt.Color('mean(privacy_risk):Q', title='Privacy Risk'),
-                tooltip=['hour:O', 'day:O', 'mean(privacy_risk):Q']
-            ).properties(
-                title='Location Privacy Risk Heatmap',
-                width=600,
-                height=400
+            pivot = df.pivot_table(
+                values="privacy_risk",
+                index="hour",
+                columns="day",
+                aggfunc="mean"
             )
-            return chart
+            
+            fig = go.Figure(
+                data=go.Heatmap(
+                    z=pivot.values,
+                    colorscale="Viridis"
+                )
+            )
+
+            fig.update_layout(
+                title="Location Privacy Risk Heatmap",
+                xaxis_title="Day of Month",
+                yaxis_title="Hour of Day",
+                height=450
+            )
+            return fig
         except Exception:
-            # Show histogram as fallback
-            chart = alt.Chart(df).mark_bar().encode(
-                x=alt.X('privacy_risk:Q', bin=True, title='Privacy Risk'),
-                y='count()',
-                tooltip=['count()']
-            ).properties(
-                title='Location Privacy Risk Distribution',
-                width=600,
-                height=400
+            # Fallback simple visualization
+            fig = go.Figure()
+            fig.add_trace(go.Histogram(x=df['privacy_risk']))
+            fig.update_layout(
+                title="Location Privacy Risk Distribution",
+                xaxis_title="Privacy Risk Score",
+                yaxis_title="Count",
+                height=450
             )
-            return chart
+            return fig
 
     def phishing_trend(self, df):
-        """Create dual-axis line chart using Altair"""
         if df.empty or 'month' not in df.columns:
-            st.info("No phishing timeline data available")
-            return None
+            # Return empty chart with message
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No phishing timeline data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
+            )
+            fig.update_layout(
+                title="Phishing Incidents vs Detection Rate",
+                height=450,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            return fig
         
-        try:
-            # Prepare data
-            df["month_str"] = df["month"].dt.strftime("%Y-%m")
-            df["detection_rate_pct"] = df["detection_rate"] * 100
-            
-            # Base chart for incidents
-            base = alt.Chart(df).encode(
-                x=alt.X('month_str:N', title='Month')
-            )
-            
-            # Line for incidents
-            line1 = base.mark_line(color='blue', strokeWidth=3).encode(
-                y=alt.Y('incidents:Q', title='Phishing Incidents', axis=alt.Axis(titleColor='blue')),
-                tooltip=['month_str:N', 'incidents:Q']
-            )
-            
-            # Line for detection rate
-            line2 = base.mark_line(color='red', strokeWidth=3).encode(
-                y=alt.Y('detection_rate_pct:Q', title='Detection Rate (%)', axis=alt.Axis(titleColor='red')),
-                tooltip=['month_str:N', 'detection_rate_pct:Q']
-            )
-            
-            # Combine charts
-            chart = alt.layer(line1, line2).resolve_scale(
-                y='independent'
-            ).properties(
-                title='Phishing Incidents vs Detection Rate',
-                width=600,
-                height=400
-            )
-            
-            return chart
-        except Exception:
-            st.info("Error creating phishing trend chart")
-            return None
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        fig.add_trace(
+            go.Scatter(
+                x=df["month"],
+                y=df["incidents"],
+                name="Phishing Incidents",
+                line=dict(width=3)
+            ),
+            secondary_y=False
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=df["month"],
+                y=df["detection_rate"] * 100,
+                name="Detection Rate (%)",
+                line=dict(width=3)
+            ),
+            secondary_y=True
+        )
+        
+        fig.update_layout(
+            title="Phishing Incidents vs Detection Rate",
+            height=450
+        )
+        
+        fig.update_yaxes(title_text="Incidents", secondary_y=False)
+        fig.update_yaxes(title_text="Detection Rate (%)", secondary_y=True)
+        
+        return fig
 
 # ---------------------------------------------------------
 # STREAMLIT DASHBOARD
@@ -290,9 +354,7 @@ def main():
         st.header("Twitter Privacy & Security Trends")
         with st.spinner("Fetching Twitter trends..."):
             df = fetcher.fetch_twitter_trends()
-            chart = viz.twitter_bubble(df)
-            if chart:
-                st.altair_chart(chart, use_container_width=True)
+            st.plotly_chart(viz.twitter_bubble(df), use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df)
 
@@ -300,9 +362,7 @@ def main():
         st.header("GitHub Security Incidents Timeline")
         with st.spinner("Fetching GitHub security data..."):
             df = fetcher.fetch_github_security_data()
-            chart = viz.security_timeline(df)
-            if chart:
-                st.altair_chart(chart, use_container_width=True)
+            st.plotly_chart(viz.security_timeline(df), use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df)
 
@@ -310,9 +370,7 @@ def main():
         st.header("Location Privacy Risk Analysis")
         with st.spinner("Generating location privacy data..."):
             df = fetcher.fetch_location_privacy_data()
-            chart = viz.privacy_heatmap(df)
-            if chart:
-                st.altair_chart(chart, use_container_width=True)
+            st.plotly_chart(viz.privacy_heatmap(df), use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df.head(20))
 
@@ -320,9 +378,7 @@ def main():
         st.header("Phishing Attack Analysis")
         with st.spinner("Generating phishing timeline data..."):
             df = fetcher.fetch_phishing_timeline()
-            chart = viz.phishing_trend(df)
-            if chart:
-                st.altair_chart(chart, use_container_width=True)
+            st.plotly_chart(viz.phishing_trend(df), use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df)
 
@@ -335,7 +391,7 @@ def main():
         st.markdown("""
         - **Real-time Data**: Live data from public APIs
         - **Privacy-Preserving**: No personal or identifiable data
-        - **Interactive Visualizations**: Using Altair/Streamlit charts
+        - **Highcharts Style**: Interactive visualizations like Highcharts
         - **Educational Focus**: For academic and research purposes
         - **Ethical Compliance**: Follows data protection guidelines
         """)
