@@ -33,36 +33,45 @@ class SocialMediaDataFetcher:
         return pd.DataFrame(data)
 
     def fetch_github_security_data(self):
-        # Live GitHub Security Advisories (Open API)
-        url = "https://api.github.com/advisories"
-        try:
-            response = requests.get(url, timeout=10)
-            advisories = response.json()[:15]
-            records = []
+    # Live GitHub Security Advisories (Open API)
+    url = "https://api.github.com/advisories"
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            advisories = response.json()
+            
+            # Check if advisories is a list and not empty
+            if isinstance(advisories, list) and len(advisories) > 0:
+                records = []
+                for a in advisories[:15]:  # Take first 15
+                    # Safely get values with defaults
+                    records.append({
+                        "severity": str(a.get("severity", "medium")).capitalize(),
+                        "published": pd.to_datetime(a.get("published_at", datetime.now())),
+                        "summary": str(a.get("summary", ""))[:80],
+                        "cvss": random.uniform(4.0, 9.5)
+                    })
+                return pd.DataFrame(records)
+    except Exception:
+        pass  # Will use fallback data
+    
+    # Fallback to synthetic data if API fails or returns empty
+    return self._get_sample_github_data()
 
-            for a in advisories:
-                records.append({
-                    "severity": a.get("severity", "medium").capitalize(),
-                    "published": pd.to_datetime(a.get("published_at")),
-                    "summary": a.get("summary", "")[:80],
-                    "cvss": random.uniform(4.0, 9.5)
-                })
-
-            return pd.DataFrame(records)
-
-        except Exception:
-            return pd.DataFrame()
-
-    def fetch_location_privacy_data(self):
-        # Synthetic anonymized location risk data
-        data = []
-        for _ in range(80):
-            data.append({
-                "hour": random.randint(0, 23),
-                "day": random.randint(1, 30),
-                "privacy_risk": random.randint(10, 95)
-            })
-        return pd.DataFrame(data)
+def _get_sample_github_data(self):
+    """Generate sample GitHub security data"""
+    dates = pd.date_range(end=datetime.now(), periods=15, freq='D')
+    severities = ["Critical", "High", "Medium", "Low"]
+    
+    data = []
+    for i, date in enumerate(dates):
+        data.append({
+            "severity": severities[i % len(severities)],
+            "published": date,
+            "summary": f"Security vulnerability {i+1} discovered",
+            "cvss": random.uniform(4.0, 9.5)
+        })
+    return pd.DataFrame(data)
 
     def fetch_phishing_timeline(self):
         months = pd.date_range("2023-06-01", "2024-03-01", freq="M")
@@ -226,3 +235,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
