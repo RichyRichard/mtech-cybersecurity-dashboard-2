@@ -10,33 +10,7 @@ import numpy as np
 import requests
 import random
 from datetime import datetime, timedelta
-
-# Try to import plotly, but handle gracefully if not available
-try:
-    import plotly.express as px
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
-    # Create placeholder classes to avoid import errors
-    class px:
-        @staticmethod
-        def scatter(*args, **kwargs):
-            return None
-    class go:
-        Figure = type('Figure', (), {})
-        Scatter = type('Scatter', (), {})
-        Bar = type('Bar', (), {})
-        Heatmap = type('Heatmap', (), {})
-        Histogram = type('Histogram', (), {})
-        @staticmethod
-        def Figure():
-            return type('DummyFigure', (), {'add_annotation': lambda **kwargs: None, 'update_layout': lambda **kwargs: None, 'add_trace': lambda **kwargs: None})()
-    class make_subplots:
-        @staticmethod
-        def make_subplots(*args, **kwargs):
-            return type('DummyFig', (), {'add_trace': lambda **kwargs: None, 'update_layout': lambda **kwargs: None, 'update_yaxes': lambda **kwargs: None})()
+import altair as alt
 
 # ---------------------------------------------------------
 # DATA FETCHER (Ethical + Open Data)
@@ -82,7 +56,7 @@ class SocialMediaDataFetcher:
                     if records:  # Only return if we have data
                         return pd.DataFrame(records)
                 
-        except Exception as e:
+        except Exception:
             # Silently fail and use fallback data
             pass
 
@@ -141,203 +115,124 @@ class SocialMediaDataFetcher:
         return pd.DataFrame(rows)
 
 # ---------------------------------------------------------
-# VISUALIZATION (Highcharts-style via Plotly)
+# VISUALIZATION (Using Altair/Streamlit native)
 # ---------------------------------------------------------
 
 class Visualizer:
 
     def twitter_bubble(self, df):
-        if not PLOTLY_AVAILABLE:
-            return self._create_no_plotly_chart("Twitter Trends Bubble Chart")
-        
-        try:
-            fig = px.scatter(
-                df,
-                x="category",
-                y="volume",
-                size="volume",
-                color="category",
-                hover_name="trend",
-                title="Twitter Privacy & Security Trends"
-            )
-            fig.update_layout(height=450)
-            return fig
-        except Exception:
-            return self._create_error_chart("Error creating Twitter trends chart")
+        """Create bubble chart using Altair"""
+        chart = alt.Chart(df).mark_circle(size=100).encode(
+            x=alt.X('category:N', title='Category'),
+            y=alt.Y('volume:Q', title='Tweet Volume'),
+            size='volume:Q',
+            color='category:N',
+            tooltip=['trend:N', 'volume:Q', 'category:N']
+        ).properties(
+            title='Twitter Privacy & Security Trends',
+            width=600,
+            height=400
+        )
+        return chart
 
     def security_timeline(self, df):
-        # Check if DataFrame is empty or doesn't have required columns
+        """Create stacked bar chart using Altair"""
         if df.empty or 'published' not in df.columns:
-            return self._create_no_data_chart("No security timeline data available")
+            st.info("No security timeline data available")
+            return None
         
-        if not PLOTLY_AVAILABLE:
-            return self._create_no_plotly_chart("Security Timeline Chart")
-        
-        # Process data safely
         try:
-            # Make a copy to avoid modifying the original
+            # Prepare data
             df_processed = df.copy()
-            df_processed["month"] = df_processed["published"].dt.to_period("M").astype(str)
-            grouped = df_processed.groupby(["month", "severity"]).size().unstack(fill_value=0)
-        except Exception:
-            # If processing fails
-            return self._create_error_chart("Error processing security data")
-        
-        # Create the chart
-        try:
-            fig = go.Figure()
-            for sev in grouped.columns:
-                fig.add_bar(x=grouped.index, y=grouped[sev], name=sev)
+            df_processed["month"] = df_processed["published"].dt.strftime("%Y-%m")
             
-            fig.update_layout(
-                barmode="stack",
-                title="GitHub Security Incidents Timeline",
-                xaxis_title="Month",
-                yaxis_title="Number of Incidents",
-                height=450
+            chart = alt.Chart(df_processed).mark_bar().encode(
+                x=alt.X('month:N', title='Month'),
+                y=alt.Y('count():Q', title='Number of Incidents'),
+                color='severity:N',
+                tooltip=['month:N', 'severity:N', 'count():Q']
+            ).properties(
+                title='GitHub Security Incidents Timeline',
+                width=600,
+                height=400
             )
-            return fig
+            return chart
         except Exception:
-            return self._create_error_chart("Error creating security timeline")
+            st.info("Error creating security timeline")
+            return None
 
     def privacy_heatmap(self, df):
-        # Check if DataFrame has enough data
-        if df.empty or 'hour' not in df.columns or 'day' not in df.columns:
-            return self._create_no_data_chart("No location privacy data available")
-        
-        if not PLOTLY_AVAILABLE:
-            return self._create_no_plotly_chart("Privacy Heatmap Chart")
+        """Create heatmap using Altair"""
+        if df.empty or 'hour' not in df.columns:
+            st.info("No location privacy data available")
+            return None
         
         try:
-            pivot = df.pivot_table(
-                values="privacy_risk",
-                index="hour",
-                columns="day",
-                aggfunc="mean"
+            chart = alt.Chart(df).mark_rect().encode(
+                x=alt.X('day:O', title='Day of Month'),
+                y=alt.Y('hour:O', title='Hour of Day'),
+                color=alt.Color('mean(privacy_risk):Q', title='Privacy Risk'),
+                tooltip=['hour:O', 'day:O', 'mean(privacy_risk):Q']
+            ).properties(
+                title='Location Privacy Risk Heatmap',
+                width=600,
+                height=400
             )
-            
-            fig = go.Figure(
-                data=go.Heatmap(
-                    z=pivot.values,
-                    colorscale="Viridis"
-                )
-            )
-
-            fig.update_layout(
-                title="Location Privacy Risk Heatmap",
-                xaxis_title="Day of Month",
-                yaxis_title="Hour of Day",
-                height=450
-            )
-            return fig
+            return chart
         except Exception:
-            # Fallback simple visualization
-            try:
-                fig = go.Figure()
-                fig.add_trace(go.Histogram(x=df['privacy_risk']))
-                fig.update_layout(
-                    title="Location Privacy Risk Distribution",
-                    xaxis_title="Privacy Risk Score",
-                    yaxis_title="Count",
-                    height=450
-                )
-                return fig
-            except Exception:
-                return self._create_error_chart("Error creating privacy visualization")
+            # Show histogram as fallback
+            chart = alt.Chart(df).mark_bar().encode(
+                x=alt.X('privacy_risk:Q', bin=True, title='Privacy Risk'),
+                y='count()',
+                tooltip=['count()']
+            ).properties(
+                title='Location Privacy Risk Distribution',
+                width=600,
+                height=400
+            )
+            return chart
 
     def phishing_trend(self, df):
+        """Create dual-axis line chart using Altair"""
         if df.empty or 'month' not in df.columns:
-            return self._create_no_data_chart("No phishing timeline data available")
-        
-        if not PLOTLY_AVAILABLE:
-            return self._create_no_plotly_chart("Phishing Trend Chart")
+            st.info("No phishing timeline data available")
+            return None
         
         try:
-            fig = make_subplots.make_subplots(specs=[[{"secondary_y": True}]])
+            # Prepare data
+            df["month_str"] = df["month"].dt.strftime("%Y-%m")
+            df["detection_rate_pct"] = df["detection_rate"] * 100
             
-            fig.add_trace(
-                go.Scatter(
-                    x=df["month"],
-                    y=df["incidents"],
-                    name="Phishing Incidents",
-                    line=dict(width=3)
-                ),
-                secondary_y=False
+            # Base chart for incidents
+            base = alt.Chart(df).encode(
+                x=alt.X('month_str:N', title='Month')
             )
             
-            fig.add_trace(
-                go.Scatter(
-                    x=df["month"],
-                    y=df["detection_rate"] * 100,
-                    name="Detection Rate (%)",
-                    line=dict(width=3)
-                ),
-                secondary_y=True
+            # Line for incidents
+            line1 = base.mark_line(color='blue', strokeWidth=3).encode(
+                y=alt.Y('incidents:Q', title='Phishing Incidents', axis=alt.Axis(titleColor='blue')),
+                tooltip=['month_str:N', 'incidents:Q']
             )
             
-            fig.update_layout(
-                title="Phishing Incidents vs Detection Rate",
-                height=450
+            # Line for detection rate
+            line2 = base.mark_line(color='red', strokeWidth=3).encode(
+                y=alt.Y('detection_rate_pct:Q', title='Detection Rate (%)', axis=alt.Axis(titleColor='red')),
+                tooltip=['month_str:N', 'detection_rate_pct:Q']
             )
             
-            fig.update_yaxes(title_text="Incidents", secondary_y=False)
-            fig.update_yaxes(title_text="Detection Rate (%)", secondary_y=True)
+            # Combine charts
+            chart = alt.layer(line1, line2).resolve_scale(
+                y='independent'
+            ).properties(
+                title='Phishing Incidents vs Detection Rate',
+                width=600,
+                height=400
+            )
             
-            return fig
+            return chart
         except Exception:
-            return self._create_error_chart("Error creating phishing trend chart")
-
-    def _create_no_plotly_chart(self, title):
-        """Create a placeholder chart when Plotly is not installed"""
-        fig = go.Figure()
-        fig.add_annotation(
-            text=f"Plotly not installed\nPlease add 'plotly>=5.17.0' to requirements.txt",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=14, color="red")
-        )
-        fig.update_layout(
-            title=title,
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-        return fig
-
-    def _create_no_data_chart(self, message):
-        """Create a chart with no data message"""
-        fig = go.Figure()
-        fig.add_annotation(
-            text=message,
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=14)
-        )
-        fig.update_layout(
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-        return fig
-
-    def _create_error_chart(self, message):
-        """Create a chart with error message"""
-        fig = go.Figure()
-        fig.add_annotation(
-            text=f"Error: {message}",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=14, color="red")
-        )
-        fig.update_layout(
-            height=450,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-        return fig
+            st.info("Error creating phishing trend chart")
+            return None
 
 # ---------------------------------------------------------
 # STREAMLIT DASHBOARD
@@ -349,16 +244,6 @@ def main():
         layout="wide",
         page_icon="🛡️"
     )
-    
-    # Display warning if Plotly is not available
-    if not PLOTLY_AVAILABLE:
-        st.error("""
-        ⚠️ **Plotly is not installed!** 
-        
-        Please add `plotly>=5.17.0` to your `requirements.txt` file and redeploy.
-        
-        Visualizations will show placeholder charts until Plotly is installed.
-        """)
     
     # Add some custom CSS
     st.markdown("""
@@ -385,13 +270,6 @@ def main():
         padding-top: 10px;
         padding-bottom: 10px;
     }
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffc107;
-        border-radius: 5px;
-        padding: 15px;
-        margin-bottom: 20px;
-    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -412,9 +290,9 @@ def main():
         st.header("Twitter Privacy & Security Trends")
         with st.spinner("Fetching Twitter trends..."):
             df = fetcher.fetch_twitter_trends()
-            fig = viz.twitter_bubble(df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
+            chart = viz.twitter_bubble(df)
+            if chart:
+                st.altair_chart(chart, use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df)
 
@@ -422,9 +300,9 @@ def main():
         st.header("GitHub Security Incidents Timeline")
         with st.spinner("Fetching GitHub security data..."):
             df = fetcher.fetch_github_security_data()
-            fig = viz.security_timeline(df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
+            chart = viz.security_timeline(df)
+            if chart:
+                st.altair_chart(chart, use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df)
 
@@ -432,9 +310,9 @@ def main():
         st.header("Location Privacy Risk Analysis")
         with st.spinner("Generating location privacy data..."):
             df = fetcher.fetch_location_privacy_data()
-            fig = viz.privacy_heatmap(df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
+            chart = viz.privacy_heatmap(df)
+            if chart:
+                st.altair_chart(chart, use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df.head(20))
 
@@ -442,9 +320,9 @@ def main():
         st.header("Phishing Attack Analysis")
         with st.spinner("Generating phishing timeline data..."):
             df = fetcher.fetch_phishing_timeline()
-            fig = viz.phishing_trend(df)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
+            chart = viz.phishing_trend(df)
+            if chart:
+                st.altair_chart(chart, use_container_width=True)
             with st.expander("View Raw Data"):
                 st.dataframe(df)
 
@@ -457,7 +335,7 @@ def main():
         st.markdown("""
         - **Real-time Data**: Live data from public APIs
         - **Privacy-Preserving**: No personal or identifiable data
-        - **Highcharts Style**: Interactive visualizations like Highcharts
+        - **Interactive Visualizations**: Using Altair/Streamlit charts
         - **Educational Focus**: For academic and research purposes
         - **Ethical Compliance**: Follows data protection guidelines
         """)
@@ -473,30 +351,6 @@ def main():
         """)
     
     st.markdown("---")
-    
-    # Installation instructions
-    if not PLOTLY_AVAILABLE:
-        with st.expander("🔧 Installation Instructions"):
-            st.markdown("""
-            ### To fix the Plotly issue:
-            
-            1. **Create a `requirements.txt` file** in your project root with:
-            ```
-            streamlit>=1.28.0
-            pandas>=2.0.0
-            numpy>=1.24.0
-            plotly>=5.17.0
-            requests>=2.31.0
-            ```
-            
-            2. **Commit and push to GitHub**
-            
-            3. **On Streamlit Cloud**:
-               - Go to your app settings
-               - Reconnect your GitHub repository
-               - Or wait for automatic deployment
-            """)
-    
     st.caption("Developed for M.Tech Cybersecurity Mini Project | Course: Ethical Issues in Information Technology")
 
 # ---------------------------------------------------------
